@@ -1,0 +1,10 @@
+name = "shorty"
+main = "src/index.js"
+compatibility_date = "2026-07-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# Worker uruchamia się TYLKO dla /api/* — reszta serwowana jest jako czysta statyka
+# (z nagłówkami z public/_headers), bez wywoływania Workera.
+run_worker_first = ["/api/*"]

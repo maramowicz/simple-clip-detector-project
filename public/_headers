@@ -1,0 +1,10 @@
+# Nagłówki dla Cloudflare Workers Static Assets.
+# Cross-origin isolation jest wymagane przez ffmpeg.wasm core-mt (SharedArrayBuffer),
+# który z kolei pozwala montować duże pliki (WORKERFS) bez ładowania całości do pamięci.
+#
+# COEP: credentialless — izolacja bez wymogu CORP na zasobach cross-origin,
+# dzięki czemu rdzeń ffmpeg z jsdelivr ładuje się bez zmian (Chrome/Firefox OK, Safari nie).
+# Docelowo (self-host rdzenia) można przełączyć na require-corp.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless

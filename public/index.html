@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shorty — selektor i cięcie fragmentów VODa</title>
+<style>
+  :root{
+    --bg:#0e0d13; --panel:#17151f; --panel-2:#1e1b28; --line:#2c2838;
+    --ink:#efeaf7; --muted:#9a92ad; --faint:#6b6480;
+    --accent:#c66bff; --accent-2:#ff7ac4;
+    --top:#c66bff; --good:#5ec7c0; --risk:#ffb454; --pick:#7dd87d;
+    --mono:'DejaVu Sans Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    --sans:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:radial-gradient(1200px 600px at 80% -10%,rgba(198,107,255,.10),transparent 60%),var(--bg);
+    color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 20px 96px}
+  header.top{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  header.top h1{font-size:26px;margin:0;letter-spacing:-.02em;font-weight:700}
+  header.top h1 b{color:var(--accent)}
+  header.top .sub{color:var(--muted);font-size:13px}
+  header.top .meta{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--faint)}
+
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative}
+  .drop{aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px;cursor:pointer;
+    background:repeating-linear-gradient(45deg,rgba(255,255,255,.015) 0 12px,transparent 12px 24px),var(--panel-2);transition:background .15s}
+  .drop.over{outline:2px dashed var(--accent);outline-offset:-14px;background:var(--panel)}
+  .drop .big{font-size:15px;font-weight:600}
+  .drop .small{color:var(--muted);font-size:13px;margin-top:8px;line-height:1.5;max-width:440px}
+  .drop svg{width:42px;height:42px;opacity:.6;margin-bottom:14px}
+  video{width:100%;display:block;background:#000;max-height:64vh}
+  .stage.has-video .drop{display:none}
+  .transport{display:none;padding:12px 14px 14px;border-top:1px solid var(--line);background:var(--panel)}
+  .stage.has-video .transport{display:block}
+  .tl-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+  .now{font-family:var(--mono);font-size:13px;color:var(--ink);min-width:66px}
+  .now .sep{color:var(--faint)}
+  .tl-btns{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+  button.mini{font:inherit;font-size:12px;background:var(--panel-2);color:var(--muted);border:1px solid var(--line);border-radius:7px;padding:5px 10px;cursor:pointer}
+  button.mini:hover{color:var(--ink);border-color:var(--accent)}
+  button.mini.on{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:600}
+  .timeline{position:relative;height:34px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line);cursor:pointer;overflow:hidden}
+  .tl-seg{position:absolute;top:0;bottom:0;opacity:.32;transition:opacity .12s}
+  .tl-seg:hover{opacity:.6}.tl-seg.active{opacity:.85}.tl-seg.picked{opacity:.5;box-shadow:inset 0 0 0 1px var(--pick)}
+  .tl-play{position:absolute;top:-3px;bottom:-3px;width:2px;background:#fff;box-shadow:0 0 6px rgba(255,255,255,.7);pointer-events:none;z-index:5}
+  .tl-labels{display:flex;justify-content:space-between;margin-top:5px;font-family:var(--mono);font-size:10px;color:var(--faint)}
+
+  .toolbar{display:flex;align-items:center;gap:10px;margin:26px 0 14px;flex-wrap:wrap}
+  .toolbar h2{margin:0;font-size:15px;font-weight:600}
+  .toolbar h2 .count{color:var(--faint);font-weight:400;font-family:var(--mono);font-size:13px}
+  .filters{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+  .chip{font-size:12px;padding:5px 11px;border-radius:20px;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--muted)}
+  .chip.on{color:var(--ink);border-color:var(--accent);background:rgba(198,107,255,.12)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px 15px 13px;position:relative;transition:border-color .15s,transform .1s;display:flex;flex-direction:column}
+  .card::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:3px;background:var(--good)}
+  .card[data-tier="top"]::before{background:var(--top)}
+  .card[data-tier="risk"]::before{background:var(--risk)}
+  .card.picked{border-color:var(--pick);background:linear-gradient(0deg,rgba(125,216,125,.05),rgba(125,216,125,.05)),var(--panel)}
+  .card.playing{border-color:var(--accent);transform:translateY(-1px)}
+  .card .tags{display:flex;align-items:center;gap:8px;margin-bottom:9px;padding-left:10px}
+  .tier-badge{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;padding:2px 7px;border-radius:5px;font-weight:700}
+  .tier-badge.top{color:var(--top);background:rgba(198,107,255,.14)}
+  .tier-badge.good{color:var(--good);background:rgba(94,199,192,.14)}
+  .tier-badge.risk{color:var(--risk);background:rgba(255,180,84,.14)}
+  .tc{font-family:var(--mono);font-size:11px;color:var(--faint);margin-left:auto}
+  .tc b{color:var(--muted);font-weight:600}
+  .card h3{margin:0 0 8px;font-size:15px;line-height:1.3;padding-left:10px}
+  .card .hook{font-size:13px;color:var(--ink);line-height:1.5;margin:0 0 8px;padding-left:10px}
+  .card .quote{font-size:12px;color:var(--muted);font-style:italic;line-height:1.45;border-left:2px solid var(--line);padding:2px 0 2px 10px;margin:0 0 8px 10px}
+  .card .why{font-size:11.5px;color:var(--faint);line-height:1.45;margin:0 0 12px;padding-left:10px}
+  .card .actions{display:flex;gap:8px;margin-top:auto;padding-left:10px;flex-wrap:wrap}
+  .btn{font:inherit;font-size:12.5px;font-weight:600;border-radius:8px;padding:7px 12px;cursor:pointer;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);display:inline-flex;align-items:center;gap:6px}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);color:#150e1c;border-color:var(--accent)}
+  .btn.primary:hover{background:var(--accent-2)}
+  .btn.pick.on{background:var(--pick);color:#0e1a0e;border-color:var(--pick)}
+  .btn svg{width:14px;height:14px}
+  .card .len{font-family:var(--mono);font-size:11px;color:var(--faint);margin-left:auto;align-self:center}
+  .no-video-note{padding-left:10px;font-size:11px;color:var(--risk);margin:0 0 8px;display:none}
+  body:not(.video-ready) .no-video-note{display:block}
+
+  /* export panel */
+  .exportbar{position:fixed;left:0;right:0;bottom:0;background:rgba(20,18,28,.94);border-top:1px solid var(--line);backdrop-filter:blur(8px);display:flex;align-items:center;gap:14px;padding:11px 22px;z-index:40;transform:translateY(110%);transition:transform .22s ease}
+  .exportbar.show{transform:none}
+  .exportbar .info{font-size:13px;color:var(--muted)}
+  .exportbar .info b{color:var(--pick);font-family:var(--mono)}
+  .exportbar .spacer{margin-left:auto}
+  .exportbar .btn{font-size:13px}
+
+  .modal-bg{position:fixed;inset:0;background:rgba(6,5,10,.72);backdrop-filter:blur(3px);z-index:60;display:none;align-items:flex-start;justify-content:center;padding:34px 16px;overflow:auto}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:100%;max-width:760px;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+  .modal-h{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .modal-h h2{margin:0;font-size:17px}
+  .modal-h .x{margin-left:auto;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
+  .modal-b{padding:14px 20px 20px}
+  .opts{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:13px;color:var(--muted)}
+  .opts label{display:flex;align-items:center;gap:6px;cursor:pointer}
+  .opts .seg-toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .opts .seg-toggle button{font:inherit;font-size:12px;padding:6px 12px;background:var(--panel-2);color:var(--muted);border:none;cursor:pointer}
+  .opts .seg-toggle button.on{background:var(--accent);color:#150e1c;font-weight:600}
+  .opts .hint{font-size:11px;color:var(--faint);flex-basis:100%;line-height:1.5}
+
+  .rows{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .erow{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .erow:last-child{border-bottom:none}
+  .erow .name{min-width:0}
+  .erow .name .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .erow .name input.fn{margin-top:5px;width:100%;font-family:var(--mono);font-size:11px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:4px 7px}
+  .erow .times{display:flex;align-items:center;gap:5px}
+  .erow .times .grp{display:flex;flex-direction:column;gap:3px}
+  .erow .times label{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
+  .erow input.tc{width:88px;font-family:var(--mono);font-size:12px;background:var(--panel-2);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 7px;text-align:center}
+  .erow input.tc:focus{outline:none;border-color:var(--accent)}
+  .erow input.tc.bad{border-color:var(--risk);color:var(--risk)}
+  .erow .setbtns{display:flex;flex-direction:column;gap:3px}
+  .erow .setbtns button{font:inherit;font-size:10px;padding:3px 6px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);border-radius:5px;cursor:pointer;white-space:nowrap}
+  .erow .setbtns button:hover{color:var(--ink);border-color:var(--accent)}
+  .erow .dur{font-family:var(--mono);font-size:12px;color:var(--faint);min-width:42px;text-align:right}
+  .modal-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center}
+  .modal-actions .spacer{margin-left:auto}
+  .prog{flex-basis:100%;margin-top:12px;display:none}
+  .prog.show{display:block}
+  .prog .bar{height:6px;background:var(--panel-2);border-radius:4px;overflow:hidden;border:1px solid var(--line)}
+  .prog .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .2s}
+  .prog .plog{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  footer.note{margin-top:26px;color:var(--faint);font-size:11.5px;line-height:1.6}
+  a{color:var(--accent)}
+  @media(max-width:600px){.wrap{padding:16px 12px 96px}.erow{grid-template-columns:1fr;gap:8px}.erow .times{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Selektor <b>shortów</b></h1>
+      <div class="sub">VOD ~90 min · transkrypcja Whisper/Groq · edycja czasów + cięcie w przeglądarce</div>
+    </div>
+    <div class="meta" id="fileMeta">brak wczytanego wideo</div>
+  </header>
+
+  <div class="stage" id="stage">
+    <label class="drop" id="drop" for="fileInput">
+      <div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15V4m0 0L8 8m4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+        <div class="big">Wczytaj plik wideo z dysku</div>
+        <div class="small">Kliknij lub przeciągnij plik tutaj. Wideo zostaje <b>lokalnie w przeglądarce</b> — nic się nie wysyła. Timecode'y kart pasują do pełnego, niepociętego VODa (3 części po 30 min, sklejone w jedną oś).</div>
+      </div>
+      <input type="file" id="fileInput" accept="video/*" hidden>
+    </label>
+    <video id="video" playsinline></video>
+    <div class="transport">
+      <div class="tl-row">
+        <div class="now"><span id="tNow">00:00:00</span><span class="sep"> / </span><span id="tDur">--:--:--</span></div>
+        <div class="tl-btns">
+          <button class="mini" id="loopBtn" title="Zapętl aktualny fragment">↻ Loop: off</button>
+          <button class="mini" data-seek="-5">−5s</button>
+          <button class="mini" data-seek="5">+5s</button>
+          <button class="mini" id="playBtn">▶ / ❚❚</button>
+        </div>
+      </div>
+      <div class="timeline" id="timeline"><div class="tl-play" id="tlPlay" style="left:0"></div></div>
+      <div class="tl-labels"><span>00:00</span><span>oś czasu VODa — bloki = fragmenty</span><span id="tlEnd">--:--</span></div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <h2>Kandydaci <span class="count" id="cardCount">(7)</span></h2>
+    <div class="filters" id="filters">
+      <span class="chip on" data-f="all">Wszystkie</span>
+      <span class="chip" data-f="top">Top</span>
+      <span class="chip" data-f="good">Dobre</span>
+      <span class="chip" data-f="risk">Ryzyko</span>
+      <span class="chip" data-f="picked">Zaznaczone</span>
+    </div>
+  </div>
+  <div class="grid" id="grid"></div>
+
+  <footer class="note">
+    Wszystko działa offline. „Odtwórz" przewija wideo; <b>Loop</b> zapętla zakres. Zaznaczone fragmenty otwierasz w oknie <b>Eksport i cięcie</b> — tam poprawiasz czasy ręcznie (wpisując timecode albo łapiąc bieżącą pozycję playheada), a następnie tniesz je w przeglądarce (ffmpeg.wasm). Plik wejściowy jest <b>montowany</b>, nie wczytywany w całości do pamięci, więc 2-godzinne VOD-y (kilka GB) działają — w RAM ląduje tylko sam wycinek. Tryb <b>Kopiuj strumień</b> (<span style="font-family:var(--mono)">-c copy</span>) jest błyskawiczny, ale tnie do najbliższej klatki kluczowej; <b>Dokładny</b> re-enkoduje dla cięcia co do klatki (trzymaj pojedynczy fragment < ~10 min).
+  </footer>
+</div>
+
+<div class="exportbar" id="exportbar">
+  <div class="info"><b id="pickCount">0</b> zaznaczonych · łącznie <b id="pickLen">0s</b></div>
+  <div class="spacer"></div>
+  <button class="btn primary" id="openExport">⚙ Eksport i cięcie</button>
+</div>
+
+<!-- modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <div class="modal-h">
+      <h2>Eksport i cięcie</h2>
+      <button class="x" id="closeModal">×</button>
+    </div>
+    <div class="modal-b">
+      <div id="fileWarn" style="display:none;margin-bottom:14px;padding:10px 12px;border:1px solid var(--risk);border-radius:9px;background:rgba(255,180,84,.1);font-size:12.5px;line-height:1.5;color:var(--risk)"></div>
+      <div class="opts">
+        <div class="seg-toggle" id="modeToggle">
+          <button data-mode="copy" class="on">Kopiuj strumień · szybko</button>
+          <button data-mode="precise">Dokładny · re-enkod</button>
+        </div>
+        <label><input type="checkbox" id="padChk"> dodaj margines <input type="number" id="padVal" value="0" min="0" max="10" step="0.5" style="width:52px;font-family:var(--mono);background:var(--panel-2);border:1px solid var(--line);color:var(--ink);border-radius:5px;padding:3px 5px"> s</label>
+        <div class="hint" id="modeHint">Kopiuj strumień: bez rekompresji, jakość 1:1, ale start/end przeskoczy do najbliższej klatki kluczowej (zwykle ±1–5 s). Idealne, gdy nie potrzebujesz cięcia co do klatki.</div>
+      </div>
+
+      <div class="rows" id="expRows"></div>
+
+      <div class="modal-actions">
+        <button class="btn" id="expTxt">↧ Timecody</button>
+        <button class="btn" id="expCsv">↧ CSV</button>
+        <button class="btn" id="expJson">↧ JSON</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="cutBtn">✂ Wytnij i pobierz pliki</button>
+        <div class="prog" id="prog">
+          <div class="bar"><i id="progBar"></i></div>
+          <div class="plog" id="progLog">Ładowanie ffmpeg…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { FFmpeg } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/index.js';
+import { toBlobURL, fetchFile } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/esm/index.js';
+import { FFFSType } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/types.js';
+window.__ff = { FFmpeg, toBlobURL, fetchFile, FFFSType };
+</script>
+<script>
+const SHORTS = [{"id":"s1","title":"Short, stinky, bottom — 3 tematy czatu","start":3889,"end":3960,"tier":"top","hook":"„Na każdym streamie czat wybiera jeden z trzech tematów, żeby mnie wkurzyć.”","why":"Sama puenta, w pełni samodzielny klip. Najlepszy kandydat.","quote":"One is calling me a bottom. Second calling me short. Third calling me stinky."},{"id":"s2","title":"Get in the bucket… a VASE!","start":4014,"end":4133,"tier":"top","hook":"Wojna o wzrost eskaluje: wiadro → „nie ma wiadra” → „mam coś lepszego — WAZON!”","why":"Eskalacja i komediowy timing, domyka się na „167 cm, I am average height”.","quote":"I got something better than a bucket! A vase! Who is the short one now?"},{"id":"s3","title":"Silly prison — strach przed psychologiem","start":4005,"end":4070,"tier":"top","hook":"„A co jeśli powiedzą, że coś ze mną nie tak i wyślą mnie do silly prison?”","why":"Relatable + absurd, czysta puenta.","quote":"I will not go to the silly prison! I'll be as silly as I want."},{"id":"s4","title":"Drama z drzwiami pociągu","start":1155,"end":1263,"tier":"good","hook":"Wolała nie wysiąść niż poprosić człowieka, żeby się przesunął. Ratuje ją babcia.","why":"Uniwersalny social-anxiety humor. Ciąć do highlightu z babcią (~50s).","quote":"There is one thing I hate even more than not opening the door: having contact with humans."},{"id":"s5","title":"Dobry przyjaciel się posika na twój widok","start":3708,"end":3760,"tier":"good","hook":"Psy sikają z radości → więc najlepsi przyjaciele to ci, co się posikają na twój widok.","why":"Format „unhinged shitpost”, idealny na krótki short.","quote":"The best friends are the ones that piss themselves when they see you."},{"id":"s6","title":"Kot na kozłku lekarskim (waleriana)","start":4984,"end":5161,"tier":"good","hook":"Kot ukradł waleriana, schował się pod łóżkiem i bronił paczki łapą — „addicted narcomen”.","why":"Dłuższa historia, dobra na 60s montaż z narracją.","quote":"Why is my cat acting like an addicted narcomen? The fuck is going on?"},{"id":"s7","title":"„Greatest ban of all time” (ryzyko)","start":4192,"end":4287,"tier":"risk","hook":"Robi coś przed kamerą: „nie ma opcji, żebym za to dostała bana… a gdyby, to byłby najlepszy ban w historii.”","why":"Clickbaitowy — zweryfikuj na wideo, czy gag działa wizualnie.","quote":"If that would get me banned, that would be the greatest ban of all time."}];
+const VOD_DURATION = 5400;
+
+// runtime edits: id -> {start,end,fname}  (nadpisują wartości bazowe)
+const edits = {};
+function cur(s){ const e=edits[s.id]||{}; return {start:e.start??s.start, end:e.end??s.end, fname:e.fname??defFn(s)}; }
+function defFn(s){ return 'short_'+s.id+'_'+s.title.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,40); }
+
+const $=s=>document.querySelector(s);
+const video=$('#video'), stage=$('#stage'), timeline=$('#timeline'), tlPlay=$('#tlPlay');
+let picks=new Set(), activeId=null, loopId=null, filter='all', cutMode='copy';
+let curVideoFile=null;
+
+const fmt=t=>{ if(!isFinite(t))return '--:--:--'; t=Math.max(0,Math.round(t));
+  const h=String(Math.floor(t/3600)).padStart(2,'0'),m=String(Math.floor(t%3600/60)).padStart(2,'0'),s=String(t%60).padStart(2,'0');return `${h}:${m}:${s}`;};
+const fmtS=t=>{t=Math.floor(t);return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;};
+function parseTC(v){ v=String(v).trim(); if(v===''||v==null) return NaN;
+  if(/^\d+(\.\d+)?$/.test(v)) return parseFloat(v);         // czyste sekundy
+  const p=v.split(':').map(x=>x.trim()); if(p.some(x=>x===''||isNaN(x))) return NaN;
+  let s=0; for(const x of p) s=s*60+parseFloat(x); return s; }
+const dur=()=> (video.duration&&isFinite(video.duration))?video.duration:VOD_DURATION;
+
+/* ---- cards ---- */
+const grid=$('#grid');
+function renderCards(){
+  grid.innerHTML=''; const tn={top:'TOP',good:'DOBRY',risk:'RYZYKO'}; let shown=0;
+  SHORTS.forEach(s=>{
+    const isPick=picks.has(s.id);
+    if(filter!=='all'){ if(filter==='picked'&&!isPick)return; if(filter!=='picked'&&s.tier!==filter)return; }
+    shown++; const c=cur(s), len=Math.round(c.end-c.start);
+    const el=document.createElement('div');
+    el.className='card'+(isPick?' picked':'')+(activeId===s.id?' playing':'');
+    el.dataset.tier=s.tier; el.dataset.id=s.id;
+    el.innerHTML=`
+      <div class="tags"><span class="tier-badge ${s.tier}">${tn[s.tier]}</span>
+        <span class="tc"><b>${fmt(c.start)}</b> → ${fmt(c.end)}</span></div>
+      <h3>${s.title}</h3>
+      <p class="hook">${s.hook}</p>
+      <p class="quote">„${s.quote}”</p>
+      <p class="why">${s.why}</p>
+      <p class="no-video-note">Wczytaj wideo, aby odtworzyć ten fragment.</p>
+      <div class="actions">
+        <button class="btn primary play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Odtwórz</button>
+        <button class="btn pick ${isPick?'on':''}">${isPick?'✓ Wybrany':'+ Zaznacz'}</button>
+        <span class="len">${len}s</span></div>`;
+    el.querySelector('.play').onclick=()=>playShort(s.id);
+    el.querySelector('.pick').onclick=()=>togglePick(s.id);
+    grid.appendChild(el);
+  });
+  $('#cardCount').textContent=`(${shown})`; renderTimeline();
+}
+function renderTimeline(){
+  timeline.querySelectorAll('.tl-seg').forEach(e=>e.remove());
+  const D=dur(), col={top:'var(--top)',good:'var(--good)',risk:'var(--risk)'};
+  SHORTS.forEach(s=>{ const c=cur(s); const seg=document.createElement('div');
+    seg.className='tl-seg'+(activeId===s.id?' active':'')+(picks.has(s.id)?' picked':'');
+    seg.style.left=(c.start/D*100)+'%'; seg.style.width=Math.max(0.6,(c.end-c.start)/D*100)+'%';
+    seg.style.background=col[s.tier]; seg.title=`${s.title} (${fmt(c.start)}→${fmt(c.end)})`;
+    seg.onclick=e=>{e.stopPropagation();playShort(s.id);}; timeline.appendChild(seg); });
+  $('#tlEnd').textContent=fmtS(D);
+}
+timeline.onclick=e=>{ const r=timeline.getBoundingClientRect(); if(video.src) video.currentTime=(e.clientX-r.left)/r.width*dur(); };
+
+function playShort(id){ const s=SHORTS.find(x=>x.id===id); if(!s)return; activeId=id; const c=cur(s);
+  if(video.src){ video.currentTime=c.start; video.play().catch(()=>{}); } refreshActive(); }
+function togglePick(id){ picks.has(id)?picks.delete(id):picks.add(id); renderCards(); updateExport(); }
+function refreshActive(){ document.querySelectorAll('.card').forEach(c=>c.classList.toggle('playing',c.dataset.id===activeId));
+  timeline.querySelectorAll('.tl-seg').forEach((seg,i)=>seg.classList.toggle('active',SHORTS[i]&&SHORTS[i].id===activeId)); }
+
+$('#loopBtn').onclick=function(){ loopId=loopId?null:activeId; if(loopId&&!activeId)loopId=null;
+  this.textContent=loopId?'↻ Loop: on':'↻ Loop: off'; this.classList.toggle('on',!!loopId); };
+video.addEventListener('timeupdate',()=>{ const D=dur(); tlPlay.style.left=(video.currentTime/D*100)+'%';
+  $('#tNow').textContent=fmt(video.currentTime);
+  if(loopId){ const s=SHORTS.find(x=>x.id===loopId); if(s){const c=cur(s); if(video.currentTime<c.start-0.3||video.currentTime>c.end) video.currentTime=c.start;} } });
+document.querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>{ if(video.src)video.currentTime+=+b.dataset.seek; });
+$('#playBtn').onclick=()=>{ if(!video.src)return; video.paused?video.play():video.pause(); };
+
+/* ---- file ---- */
+const drop=$('#drop'), input=$('#fileInput');
+function loadFile(f){ if(!f||!f.type.startsWith('video/')){alert('To nie jest plik wideo.');return;}
+  curVideoFile=f; video.src=URL.createObjectURL(f); stage.classList.add('has-video');
+  document.body.classList.add('video-ready'); $('#fileMeta').textContent=f.name+' · '+(f.size/1048576).toFixed(0)+' MB'; }
+input.onchange=e=>loadFile(e.target.files[0]);
+video.addEventListener('loadedmetadata',()=>{ $('#tDur').textContent=fmt(video.duration); renderTimeline(); });
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>loadFile(e.dataTransfer.files[0]));
+window.addEventListener('dragover',e=>e.preventDefault());
+window.addEventListener('drop',e=>{ if(!stage.classList.contains('has-video')){e.preventDefault();loadFile(e.dataTransfer.files[0]);} });
+
+/* ---- filters ---- */
+$('#filters').onclick=e=>{ const chip=e.target.closest('.chip'); if(!chip)return; filter=chip.dataset.f;
+  document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c===chip)); renderCards(); };
+
+/* ---- export selection ---- */
+function selectedSorted(){ return SHORTS.filter(s=>picks.has(s.id)).sort((a,b)=>cur(a).start-cur(b).start); }
+function updateExport(){ const sel=selectedSorted(); $('#exportbar').classList.toggle('show',sel.length>0);
+  $('#pickCount').textContent=sel.length; $('#pickLen').textContent=Math.round(sel.reduce((a,s)=>{const c=cur(s);return a+(c.end-c.start);},0))+'s'; }
+function download(name,text,type){ const b=new Blob([text],{type}),u=URL.createObjectURL(b);
+  const a=document.createElement('a'); a.href=u; a.download=name; a.click(); URL.revokeObjectURL(u); }
+
+/* ---- modal + editable rows ---- */
+const modalBg=$('#modalBg'), expRows=$('#expRows');
+$('#openExport').onclick=openModal; $('#closeModal').onclick=()=>modalBg.classList.remove('show');
+modalBg.onclick=e=>{ if(e.target===modalBg) modalBg.classList.remove('show'); };
+function openModal(){
+  buildRows();
+  const warn=$('#fileWarn');
+  const GB=1073741824;
+  const iso = window.crossOriginIsolated===true;
+  const sz = curVideoFile ? curVideoFile.size : 0;
+  const big = sz >= 2*GB;
+  let msg='', show=false;
+  if(location.protocol==='file:'){
+    show=true; msg='⚠ Strona działa przez <b>file://</b>. Cięcie w przeglądarce nie zadziała. Uruchom serwer (patrz niżej) i otwórz przez <span style="font-family:var(--mono)">http://localhost:8000/</span>.';
+  } else if(big && !iso){
+    show=true; msg='⚠ Plik ma <b>'+(sz/GB).toFixed(1)+' GB</b> (≥ 2 GB) i wymaga trybu wielowątkowego, a ten jest teraz <b>wyłączony</b> (brak izolacji cross-origin). Uruchom dołączony <span style="font-family:var(--mono)">python3 serve.py</span> zamiast zwykłego serwera i odśwież — wtedy pojawi się <span style="font-family:var(--mono)">crossOriginIsolated=true</span> i montowanie dużych plików zadziała. Pliki < 2 GB tną się bez tego.';
+  } else if(big && iso){
+    show=true; msg='✓ Tryb wielowątkowy aktywny (izolacja cross-origin). Plik '+(sz/GB).toFixed(1)+' GB zostanie zamontowany (WORKERFS) — bez ładowania całości do pamięci.';
+    warn.style.borderColor='var(--good)'; warn.style.background='rgba(94,199,192,.1)'; warn.style.color='var(--good)';
+  }
+  if(show && !(big&&iso)){ warn.style.borderColor='var(--risk)'; warn.style.background='rgba(255,180,84,.1)'; warn.style.color='var(--risk)'; }
+  warn.innerHTML=msg; warn.style.display=show?'block':'none';
+  modalBg.classList.add('show');
+}
+
+function buildRows(){
+  const sel=selectedSorted(); expRows.innerHTML='';
+  if(!sel.length){ expRows.innerHTML='<div style="padding:16px;color:var(--faint);font-size:13px">Brak zaznaczonych fragmentów.</div>'; return; }
+  sel.forEach(s=>{
+    const c=cur(s);
+    const row=document.createElement('div'); row.className='erow'; row.dataset.id=s.id;
+    row.innerHTML=`
+      <div class="name">
+        <div class="t" title="${s.title}">${s.title}</div>
+        <input class="fn" value="${c.fname}" spellcheck="false">
+      </div>
+      <div class="times">
+        <div class="grp"><label>start</label><input class="tc st" value="${fmt(c.start)}"></div>
+        <div class="setbtns"><button class="set-st">◀ z playhead</button><button class="go-st">▶ podgląd</button></div>
+        <div class="grp"><label>koniec</label><input class="tc en" value="${fmt(c.end)}"></div>
+        <div class="setbtns"><button class="set-en">◀ z playhead</button><button class="go-en">▶ podgląd</button></div>
+      </div>
+      <div class="dur">${Math.round(c.end-c.start)}s</div>`;
+    const stI=row.querySelector('.st'), enI=row.querySelector('.en'), durEl=row.querySelector('.dur'), fnI=row.querySelector('.fn');
+    function commit(){
+      const st=parseTC(stI.value), en=parseTC(enI.value);
+      const okSt=isFinite(st)&&st>=0, okEn=isFinite(en)&&en>st;
+      stI.classList.toggle('bad',!okSt); enI.classList.toggle('bad',!okEn);
+      edits[s.id]=edits[s.id]||{};
+      if(okSt) edits[s.id].start=st;
+      if(okEn) edits[s.id].end=en;
+      edits[s.id].fname=fnI.value.trim()||defFn(s);
+      if(okSt&&okEn) durEl.textContent=Math.round(en-st)+'s';
+      renderCards(); updateExport();
+    }
+    stI.addEventListener('change',commit); enI.addEventListener('change',commit); fnI.addEventListener('change',commit);
+    row.querySelector('.set-st').onclick=()=>{ if(video.src){stI.value=fmt(video.currentTime);commit();} };
+    row.querySelector('.set-en').onclick=()=>{ if(video.src){enI.value=fmt(video.currentTime);commit();} };
+    row.querySelector('.go-st').onclick=()=>{ if(video.src){video.currentTime=parseTC(stI.value)||0;video.play().catch(()=>{});} };
+    row.querySelector('.go-en').onclick=()=>{ if(video.src){video.currentTime=Math.max(0,(parseTC(enI.value)||0)-2);video.play().catch(()=>{});} };
+    expRows.appendChild(row);
+  });
+}
+
+/* mode toggle */
+$('#modeToggle').onclick=e=>{ const b=e.target.closest('button'); if(!b)return; cutMode=b.dataset.mode;
+  $('#modeToggle').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#modeHint').textContent = cutMode==='copy'
+    ? 'Kopiuj strumień: bez rekompresji, jakość 1:1, ale start/end przeskoczy do najbliższej klatki kluczowej (zwykle ±1–5 s). Idealne, gdy nie potrzebujesz cięcia co do klatki.'
+    : 'Dokładny: re-enkoduje H.264/AAC, cięcie co do klatki, ale wolniejsze i pełne obciążenie CPU. Wybieraj, gdy start musi trafić idealnie w słowo/moment.';
+};
+
+/* text exports */
+$('#expTxt').onclick=()=>download('shorty_timecody.txt',
+  selectedSorted().map(s=>{const c=cur(s);return `${fmt(c.start)} - ${fmt(c.end)}  (${Math.round(c.end-c.start)}s)  ${s.title}`;}).join('\n'),'text/plain');
+$('#expCsv').onclick=()=>{ const rows=[['id','title','start_s','end_s','start_tc','end_tc','len_s','tier','filename']];
+  selectedSorted().forEach(s=>{const c=cur(s);rows.push([s.id,'"'+s.title.replace(/"/g,'""')+'"',c.start.toFixed(2),c.end.toFixed(2),fmt(c.start),fmt(c.end),Math.round(c.end-c.start),s.tier,c.fname]);});
+  download('shorty_wybrane.csv',rows.map(r=>r.join(',')).join('\n'),'text/csv'); };
+$('#expJson').onclick=()=>download('shorty_wybrane.json',
+  JSON.stringify(selectedSorted().map(s=>{const c=cur(s);return {id:s.id,title:s.title,start:c.start,end:c.end,start_tc:fmt(c.start),end_tc:fmt(c.end),len:Math.round(c.end-c.start),tier:s.tier,filename:c.fname,hook:s.hook};}),null,2),'application/json');
+
+/* ---- ffmpeg cutting ---- */
+let ffmpeg=null, ffLoaded=false;
+async function ensureFF(){
+  if(ffLoaded) return ffmpeg;
+  if(!window.__ff){ throw new Error('Biblioteka ffmpeg nie została załadowana (brak internetu przy pierwszym uruchomieniu?).'); }
+  const {FFmpeg,toBlobURL}=window.__ff;
+  ffmpeg=new FFmpeg();
+  ffmpeg.on('log',({message})=>{ if(message) $('#progLog').textContent=message.slice(0,120); });
+  ffmpeg.on('progress',({progress})=>{ /* per-plik; łączony pasek liczymy ręcznie */ });
+  // Do montowania dużych plików (WORKERFS) potrzebny jest core-mt, który biegnie w prawdziwym
+  // workerze z pthreadami. Wymaga on cross-origin isolation (nagłówki COOP/COEP) i SharedArrayBuffer.
+  // Single-thread core (bez -mt) w ESM NIE obsługuje WORKERFS (assert ENVIRONMENT_IS_WORKER).
+  const mt = window.crossOriginIsolated === true;
+  window.__ffMt = mt;
+  const base = mt
+    ? 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@0.12.10/dist/esm'
+    : 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
+  const ffBase='https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm';
+  // Główny worker klasy FFmpeg jest ładowany przez import.meta.url względem CDN,
+  // co przeglądarka blokuje jako cross-origin. Owijamy go w blob z NASZEGO origin,
+  // który dopiero importuje właściwy worker z CDN — to omija blokadę.
+  const classWorkerURL = URL.createObjectURL(new Blob(
+    [`import "${ffBase}/worker.js";`], {type:'text/javascript'}
+  ));
+  const cfg = {
+    coreURL: await toBlobURL(`${base}/ffmpeg-core.js`,'text/javascript'),
+    wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`,'application/wasm'),
+    classWorkerURL,
+  };
+  if(mt){ cfg.workerURL = await toBlobURL(`${base}/ffmpeg-core.worker.js`,'text/javascript'); }
+  const loadP = ffmpeg.load(cfg);
+  // zabezpieczenie: gdy worker nie wstaje (np. otwarcie przez file://), nie wisimy w nieskończoność
+  const timeout = new Promise((_,rej)=>setTimeout(()=>rej(new Error(
+    location.protocol==='file:'
+      ? 'Silnik nie wstał przy otwarciu przez file://. Uruchom stronę przez serwer HTTP i odśwież.'
+      : 'Silnik ffmpeg nie odpowiedział w czasie (możliwy problem z siecią lub blokadą CDN).'
+  )),25000));
+  await Promise.race([loadP,timeout]);
+  ffLoaded=true; return ffmpeg;
+}
+function extOf(name){ const m=/\.([a-z0-9]+)$/i.exec(name||''); return m?m[1].toLowerCase():'mp4'; }
+
+$('#cutBtn').onclick=async()=>{
+  const sel=selectedSorted();
+  if(!sel.length){ alert('Nie zaznaczono fragmentów.'); return; }
+  if(!curVideoFile){ alert('Najpierw wczytaj plik wideo.'); return; }
+  const prog=$('#prog'), bar=$('#progBar'), plog=$('#progLog'), btn=$('#cutBtn');
+  prog.classList.add('show'); btn.disabled=true; btn.style.opacity=.6;
+  const pad=$('#padChk').checked?Math.max(0,parseFloat($('#padVal').value)||0):0;
+  const MOUNT='/mnt', mountedName=curVideoFile.name.replace(/[^\w.\-]/g,'_') || 'input.mp4';
+  let inPath=mountedName;
+  let mounted=false;
+  const GB=1073741824;
+
+  try{
+    plog.textContent='Ładowanie silnika ffmpeg (jednorazowo, ~30 MB)…';
+    const ff=await ensureFF();
+    const {FFFSType,fetchFile}=window.__ff;
+    const WORKERFS = (FFFSType&&FFFSType.WORKERFS) || 'WORKERFS';
+
+    // Strategia:
+    //  • plik < 2 GB  -> writeFile (wczytanie do pamięci). Niezawodne, mieści się w limicie WASM.
+    //  • plik >= 2 GB -> WORKERFS (montowanie), ale to wymaga core-mt + cross-origin isolation.
+    const bigFile = curVideoFile.size >= 2*GB;
+    const useMount = bigFile && window.__ffMt === true;
+
+    if(bigFile && !window.__ffMt){
+      throw new Error(
+        'Plik ma '+(curVideoFile.size/GB).toFixed(1)+' GB — za dużo, by wczytać go w całości do pamięci przeglądarki (limit WASM). '+
+        'Montowanie dużych plików (WORKERFS) wymaga trybu wielowątkowego, a ten działa tylko przy włączonej izolacji cross-origin '+
+        '(nagłówki COOP/COEP), których zwykły serwer nie wysyła.\n\n'+
+        'Rozwiązanie: uruchom dołączony serwer serve.py (wysyła te nagłówki) zamiast `python3 -m http.server`, '+
+        'odśwież stronę i potnij ponownie. Sprawdź też w konsoli: `crossOriginIsolated` powinno być true.'
+      );
+    }
+
+    if(!useMount){
+      plog.textContent='Wczytywanie pliku do pamięci ('+(curVideoFile.size/GB).toFixed(2)+' GB)…';
+      await ff.writeFile(mountedName, await fetchFile(curVideoFile));
+      inPath=mountedName;
+    } else {
+      plog.textContent='Duży plik ('+(curVideoFile.size/GB).toFixed(1)+' GB) — montowanie przez WORKERFS…';
+      try{ await ff.unmount(MOUNT); }catch(_){}
+      try{ await ff.deleteDir(MOUNT); }catch(_){}
+      await ff.createDir(MOUNT);
+      await ff.mount(WORKERFS, { files:[curVideoFile] }, MOUNT);
+      mounted=true;
+      inPath=`${MOUNT}/${mountedName}`;
+    }
+
+    const inExt=extOf(mountedName);
+    for(let i=0;i<sel.length;i++){
+      const s=sel[i], c=cur(s);
+      const st=Math.max(0,c.start-pad), en=c.end+pad, len=Math.max(0.1,en-st);
+      const copyMode=cutMode==='copy';
+      const outExt=copyMode?inExt:'mp4';
+      const outName=`out_${i}.${outExt}`;
+      bar.style.width=((i)/sel.length*100).toFixed(1)+'%';
+      plog.textContent=`(${i+1}/${sel.length}) cięcie: ${s.title.slice(0,40)}…`;
+      // -ss przed -i => szybki seek; przy WORKERFS czytane są tylko bajty od keyframe.
+      const args = copyMode
+        ? ['-ss',st.toFixed(3),'-i',inPath,'-t',len.toFixed(3),'-c','copy','-avoid_negative_ts','make_zero',outName]
+        : ['-ss',st.toFixed(3),'-i',inPath,'-t',len.toFixed(3),'-c:v','libx264','-preset','veryfast','-crf','20','-c:a','aac','-b:a','160k','-movflags','+faststart',outName];
+      await ff.exec(args);
+      const data=await ff.readFile(outName);
+      const mime=outExt==='webm'?'video/webm':outExt==='mkv'?'video/x-matroska':'video/mp4';
+      const blob=new Blob([data.buffer],{type:mime});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download=c.fname.replace(/\.[a-z0-9]+$/i,'')+'.'+outExt; a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      try{ await ff.deleteFile(outName); }catch(_){}
+    }
+    bar.style.width='100%'; plog.textContent=`Gotowe — pobrano ${sel.length} plik(ów).`;
+  }catch(err){
+    console.error('CUT FAILED:', err);
+    const detail = [
+      'name: '+(err&&err.name),
+      'message: '+(err&&err.message),
+      'errno: '+(err&&err.errno),
+      'code: '+(err&&err.code),
+    ].join('\n');
+    console.error(detail);
+    console.error(err&&err.stack);
+    plog.textContent='Błąd: '+(err&&(err.message||err.name)||err);
+    alert('Cięcie nie powiodło się.\n\n'+detail+'\n\nPełny stack jest w konsoli (F12). Skopiuj go — jednoznacznie wskaże, na którym kroku (mount / exec / readFile) i z jakim errno to leci.');
+  }finally{
+    try{
+      if(mounted){ await ffmpeg.unmount(MOUNT); }
+      else { await ffmpeg.deleteFile(mountedName); }
+    }catch(_){}
+    btn.disabled=false; btn.style.opacity=1;
+  }
+};
+
+renderCards(); updateExport();
+</script>
+</body>
+</html>
