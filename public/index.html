@@ -149,6 +149,7 @@
   .txblock .dl{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
   .txblock .dl button{font:inherit;font-size:11px;padding:4px 9px;background:var(--panel);border:1px solid var(--line);color:var(--muted);border-radius:6px;cursor:pointer}
   .txblock .dl button:hover{color:var(--ink);border-color:var(--accent)}
+  .seg-toggle button:disabled{opacity:.4;cursor:not-allowed}
 
   /* prawy drawer: transkrypcja całego VODa */
   .sidetab{position:fixed;right:0;top:120px;z-index:45;writing-mode:vertical-rl;transform:rotate(180deg);
@@ -258,11 +259,10 @@
       </select>
     </div>
     <div class="fld"><label>silnik</label>
-      <select id="allEngineSel">
-        <option value="auto" selected>Auto</option>
-        <option value="webgpu">WebGPU (GPU)</option>
-        <option value="wasm">CPU (WASM)</option>
-      </select>
+      <div class="seg-toggle" id="allEng">
+        <button data-eng="webgpu">GPU (WebGPU)</button>
+        <button data-eng="wasm" class="on">CPU (WASM)</button>
+      </div>
       <span class="engine" id="allEngineStatus">wykrywanie…</span>
     </div>
     <div class="fld"><label>język</label>
@@ -334,13 +334,12 @@
               <option value="english">angielski</option>
             </select>
           </label>
-          <label class="txsel">silnik
-            <select id="txEngineSel">
-              <option value="auto" selected>Auto</option>
-              <option value="webgpu">WebGPU (GPU)</option>
-              <option value="wasm">CPU (WASM)</option>
-            </select>
-          </label>
+          <span class="txsel">silnik
+            <span class="seg-toggle" id="txEng">
+              <button data-eng="webgpu">GPU (WebGPU)</button>
+              <button data-eng="wasm" class="on">CPU (WASM)</button>
+            </span>
+          </span>
           <span class="engine" id="txEngineStatus">wykrywanie…</span>
           <button class="btn primary" id="txBtn">⌨ Transkrybuj lokalnie</button>
           <div class="note">Wszystko liczy się w Twojej przeglądarce — audio <b>nie opuszcza urządzenia</b>. Model pobiera się raz (potem działa offline z cache). Pierwsze uruchomienie większego modelu może chwilę potrwać. Wynik pobierzesz jako TXT / SRT / VTT (timecody względem początku fragmentu).</div>
@@ -761,28 +760,34 @@ let txWorker=null, txReqId=0; const txPending=new Map();
 let txDevice='wasm';
 let gpuAvailable=false, gpuChecked=false;
 
-// Wykrywa dostępność WebGPU i aktualizuje status w obu panelach. Nie NARZUCA silnika —
-// wyboru dokonuje selektor (Auto/WebGPU/CPU); tu tylko informujemy i wyłączamy WebGPU gdy go brak.
+const GPU_OK_TIP='Liczy na karcie graficznej (WebGPU) — kilkukrotnie szybciej niż CPU.';
+const GPU_NO_TIP='WebGPU niedostępne w tej przeglądarce (np. Firefox bez WebGPU). Otwórz stronę w Chrome/Edge (albo Safari 26+), aby użyć GPU.';
+const CPU_TIP='Liczy na procesorze (WASM). Wolniej, ale działa w każdej przeglądarce — zawsze dostępne.';
+
+// dwa przyciski GPU/CPU: kliknięcie wybiera (o ile nie disabled)
+function setupEng(id){ const c=$(id); if(!c) return;
+  c.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ if(b.disabled) return;
+    c.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); })); }
+function engValue(id){ const c=$(id); const on=c&&c.querySelector('button.on:not([disabled])'); return on?on.dataset.eng:'wasm'; }
+setupEng('#txEng'); setupEng('#allEng');
+
+// Wykrywa WebGPU: ustawia tooltipy (w tym POWÓD, gdy się nie da), wyłącza przycisk GPU
+// gdy brak sprzętu i przy pierwszym wykryciu ustawia sensowny domyślny wybór.
 async function detectEngine(){
   let gpu=false;
   try{ if('gpu' in navigator && navigator.gpu){ const a=await navigator.gpu.requestAdapter(); gpu=!!a; } }catch(_){}
-  gpuAvailable=gpu; gpuChecked=true;
+  gpuAvailable=gpu;
   ['#txEngineStatus','#allEngineStatus'].forEach(sel=>{ const el=$(sel);
-    if(el){ el.textContent = gpu ? 'WebGPU dostępne' : 'WebGPU niedostępne → CPU'; el.classList.toggle('gpu',gpu); } });
-  ['#txEngineSel','#allEngineSel'].forEach(sel=>{ const s=$(sel); if(!s) return;
-    const opt=s.querySelector('option[value="webgpu"]');
-    if(opt){ opt.disabled=!gpu; opt.textContent = gpu ? 'WebGPU (GPU)' : 'WebGPU (niedostępne)'; }
-    if(!gpu && s.value==='webgpu') s.value='auto';
+    if(el){ el.textContent = gpu ? 'WebGPU: dostępne' : 'WebGPU: niedostępne'; el.classList.toggle('gpu',gpu); } });
+  ['#txEng','#allEng'].forEach(id=>{ const c=$(id); if(!c) return;
+    const g=c.querySelector('button[data-eng="webgpu"]'), w=c.querySelector('button[data-eng="wasm"]');
+    if(g){ g.disabled=!gpu; g.title = gpu?GPU_OK_TIP:GPU_NO_TIP; }
+    if(w){ w.title = CPU_TIP; }
+    if(!gpuChecked){ c.querySelectorAll('button').forEach(x=>x.classList.remove('on')); (gpu?g:w).classList.add('on'); }
+    else if(!gpu && g && g.classList.contains('on')){ g.classList.remove('on'); if(w) w.classList.add('on'); }
   });
+  gpuChecked=true;
   return gpuAvailable;
-}
-// Rozstrzyga finalny silnik z selektora: auto → wykryty; wymuszenie webgpu/wasm respektujemy
-// (worker i tak ma fallback webgpu→wasm, gdy sprzęt zawiedzie).
-function pickDevice(selId){
-  const v=($(selId)&&$(selId).value)||'auto';
-  if(v==='webgpu') return 'webgpu';
-  if(v==='wasm')   return 'wasm';
-  return gpuAvailable ? 'webgpu' : 'wasm';
 }
 function ensureTxWorker(){
   if(txWorker) return txWorker;
@@ -861,7 +866,7 @@ $('#txBtn').onclick=async()=>{
     const b=renderTxBlock(s,len); results.appendChild(b.wrap); blocks[s.id]=b; });
 
   try{
-    await detectEngine(); txDevice=pickDevice('#txEngineSel');
+    await detectEngine(); txDevice=engValue('#txEng');
     setStep('ensureFF'); plog.textContent='Ładowanie silnika ffmpeg…';
     const ff=await ensureFF();
     prep=await prepareFFInput(setStep,plog);
@@ -920,7 +925,7 @@ $('#allBtn').onclick=async()=>{
   let prep=null; const allChunks=[]; const parts=[];
 
   try{
-    await detectEngine(); txDevice=pickDevice('#allEngineSel');
+    await detectEngine(); txDevice=engValue('#allEng');
     setStep('ensureFF'); log.textContent='Ładowanie silnika ffmpeg…';
     const ff=await ensureFF();
     prep=await prepareFFInput(setStep,log);

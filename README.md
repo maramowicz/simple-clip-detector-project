@@ -36,9 +36,15 @@ liczona jest z wczytanego wideo.
 W oknie „Eksport i cięcie" jest panel **Transkrypcja**. Dla zaznaczonych fragmentów:
 ffmpeg wycina audio 16 kHz mono (`-vn -ac 1 -ar 16000 -f f32le`), a **Transformers.js**
 (Whisper przez ONNX Runtime Web) transkrybuje je lokalnie — audio nie opuszcza urządzenia.
-Silnik: **WebGPU** gdy dostępny (auto-fallback na **WASM/CPU**). Model wybierasz w UI
+Silnik wybierasz dwoma przyciskami **GPU (WebGPU) / CPU (WASM)** — przycisk GPU jest
+wyłączony, gdy przeglądarka nie ma WebGPU (tooltip tłumaczy dlaczego). Model wybierasz w UI
 (tiny/base/small/large-v3-turbo); pobiera się raz i jest cache'owany. Wynik: TXT / SRT / VTT
 (timecody względem początku fragmentu). To alternatywa dla chmurowego `/api/transcribe`.
+
+Ponieważ strona jest cross-origin isolated (COOP/COEP dla ffmpeg core-mt), pobieranie modeli
+wprost z `huggingface.co` pada na CORS. Dlatego modele idą przez proxy Workera **`/api/hf/*`**
+(same-origin) — Transformers.js ma ustawione `env.remoteHost` na nasz origin. Transkrypcja
+działa więc tylko z uruchomionym Workerem (`wrangler dev` lub deploy), nie na gołym `serve.py`.
 
 ## Dlaczego cross-origin isolation
 

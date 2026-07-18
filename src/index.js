@@ -24,6 +24,14 @@ export default {
       return json({ ok: true, ts: Date.now() });
     }
 
+    // Proxy do Hugging Face Hub dla lokalnej transkrypcji (Transformers.js).
+    // Strona jest cross-origin isolated (COOP/COEP dla ffmpeg core-mt), więc bezpośrednie
+    // pobieranie modeli z huggingface.co pada na CORS/COEP. Podając je przez nasz origin
+    // (same-origin) problem znika. Transformers.js ma ustawione remoteHost=nasz origin.
+    if (url.pathname.startsWith('/api/hf/')) {
+      return handleHfProxy(url, request);
+    }
+
     if (url.pathname === '/api/transcribe') {
       if (request.method !== 'POST') {
         return json({ error: 'method_not_allowed' }, 405, { Allow: 'POST' });
@@ -85,6 +93,53 @@ async function handleTranscribe(request, env) {
   const outHeaders = new Headers(resp.headers);
   outHeaders.delete('Transfer-Encoding');
   return new Response(resp.body, { status: resp.status, headers: outHeaders });
+}
+
+// Proxy plików modeli z Hugging Face Hub. Podąża za przekierowaniami do CDN (wagi LFS),
+// strumieniuje odpowiedź i dokłada nagłówki, dzięki którym zasób jest same-origin/dozwolony
+// pod cross-origin isolation. Obsługuje Range (ORT potrafi pobierać wagi zakresami).
+async function handleHfProxy(url, request) {
+  const rest = url.pathname.slice('/api/hf/'.length);
+  if (!rest) return json({ error: 'bad_hf_path' }, 400);
+  const target = 'https://huggingface.co/' + rest + url.search;
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders() });
+  }
+
+  const fwd = new Headers();
+  const range = request.headers.get('Range');
+  if (range) fwd.set('Range', range);
+  fwd.set('Accept', request.headers.get('Accept') || '*/*');
+
+  let upstream;
+  try {
+    upstream = await fetch(target, {
+      method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+      headers: fwd,
+      redirect: 'follow',
+      // model files są niezmienne — pozwól Cloudflare je cache'ować (mniej egressu, szybciej)
+      cf: { cacheEverything: true, cacheTtl: 86400 },
+    });
+  } catch (err) {
+    return json({ error: 'hf_fetch_failed', message: String(err && err.message || err) }, 502);
+  }
+
+  const h = new Headers(upstream.headers);
+  h.delete('set-cookie');
+  h.set('Access-Control-Allow-Origin', '*');
+  h.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  h.set('Cache-Control', h.get('Cache-Control') || 'public, max-age=86400');
+  return new Response(upstream.body, { status: upstream.status, headers: h });
+}
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Access-Control-Allow-Headers': 'Range, Accept',
+    'Access-Control-Max-Age': '86400',
+  };
 }
 
 function json(obj, status = 200, extra) {

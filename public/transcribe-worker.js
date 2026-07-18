@@ -6,6 +6,13 @@ import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transfo
 // modele/wagi pobierane z Hugging Face Hub; cache w przeglądarce po pierwszym razie
 env.allowLocalModels = false;
 
+// Strona jest cross-origin isolated (COOP/COEP dla ffmpeg core-mt), więc bezpośrednie
+// pobieranie z huggingface.co pada na CORS/COEP. Kierujemy pobieranie modeli przez nasz
+// Worker (/api/hf/*) — wtedy pliki są SAME-ORIGIN i ładują się bez problemu.
+// (Wymaga działającego Workera: wrangler dev lub deploy; goły serve.py tego nie obsłuży.)
+env.remoteHost = self.location.origin;
+env.remotePathTemplate = 'api/hf/{model}/resolve/{revision}/';
+
 // Mapowanie logicznego rozmiaru na konkretne repo + dtype, per silnik.
 //  • WebGPU: onnx-community/* (fp16 enkoder + q4 dekoder — kompromis jakość/VRAM).
 //  • WASM (CPU): Xenova/* (skwantowane q8) dla małych; turbo tylko z onnx-community (q4).
