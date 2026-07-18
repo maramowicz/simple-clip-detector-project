@@ -256,7 +256,14 @@
         <option value="small">small (~250 MB)</option>
         <option value="turbo">large-v3-turbo (~800 MB, GPU)</option>
       </select>
-      <span class="engine" id="allEngine">wykrywanie…</span>
+    </div>
+    <div class="fld"><label>silnik</label>
+      <select id="allEngineSel">
+        <option value="auto" selected>Auto</option>
+        <option value="webgpu">WebGPU (GPU)</option>
+        <option value="wasm">CPU (WASM)</option>
+      </select>
+      <span class="engine" id="allEngineStatus">wykrywanie…</span>
     </div>
     <div class="fld"><label>język</label>
       <select id="allLang">
@@ -327,7 +334,14 @@
               <option value="english">angielski</option>
             </select>
           </label>
-          <span class="engine" id="txEngine">wykrywanie…</span>
+          <label class="txsel">silnik
+            <select id="txEngineSel">
+              <option value="auto" selected>Auto</option>
+              <option value="webgpu">WebGPU (GPU)</option>
+              <option value="wasm">CPU (WASM)</option>
+            </select>
+          </label>
+          <span class="engine" id="txEngineStatus">wykrywanie…</span>
           <button class="btn primary" id="txBtn">⌨ Transkrybuj lokalnie</button>
           <div class="note">Wszystko liczy się w Twojej przeglądarce — audio <b>nie opuszcza urządzenia</b>. Model pobiera się raz (potem działa offline z cache). Pierwsze uruchomienie większego modelu może chwilę potrwać. Wynik pobierzesz jako TXT / SRT / VTT (timecody względem początku fragmentu).</div>
         </div>
@@ -745,14 +759,30 @@ $('#cutBtn').onclick=async()=>{
 /* ---- lokalna transkrypcja (Transformers.js w same-origin Web Workerze) ---- */
 let txWorker=null, txReqId=0; const txPending=new Map();
 let txDevice='wasm';
+let gpuAvailable=false, gpuChecked=false;
 
+// Wykrywa dostępność WebGPU i aktualizuje status w obu panelach. Nie NARZUCA silnika —
+// wyboru dokonuje selektor (Auto/WebGPU/CPU); tu tylko informujemy i wyłączamy WebGPU gdy go brak.
 async function detectEngine(){
   let gpu=false;
   try{ if('gpu' in navigator && navigator.gpu){ const a=await navigator.gpu.requestAdapter(); gpu=!!a; } }catch(_){}
-  txDevice = gpu ? 'webgpu' : 'wasm';
-  ['#txEngine','#allEngine'].forEach(sel=>{ const el=$(sel);
-    if(el){ el.textContent = gpu ? 'WebGPU ✓' : 'WASM (CPU)'; el.classList.toggle('gpu',gpu); } });
-  return txDevice;
+  gpuAvailable=gpu; gpuChecked=true;
+  ['#txEngineStatus','#allEngineStatus'].forEach(sel=>{ const el=$(sel);
+    if(el){ el.textContent = gpu ? 'WebGPU dostępne' : 'WebGPU niedostępne → CPU'; el.classList.toggle('gpu',gpu); } });
+  ['#txEngineSel','#allEngineSel'].forEach(sel=>{ const s=$(sel); if(!s) return;
+    const opt=s.querySelector('option[value="webgpu"]');
+    if(opt){ opt.disabled=!gpu; opt.textContent = gpu ? 'WebGPU (GPU)' : 'WebGPU (niedostępne)'; }
+    if(!gpu && s.value==='webgpu') s.value='auto';
+  });
+  return gpuAvailable;
+}
+// Rozstrzyga finalny silnik z selektora: auto → wykryty; wymuszenie webgpu/wasm respektujemy
+// (worker i tak ma fallback webgpu→wasm, gdy sprzęt zawiedzie).
+function pickDevice(selId){
+  const v=($(selId)&&$(selId).value)||'auto';
+  if(v==='webgpu') return 'webgpu';
+  if(v==='wasm')   return 'wasm';
+  return gpuAvailable ? 'webgpu' : 'wasm';
 }
 function ensureTxWorker(){
   if(txWorker) return txWorker;
@@ -831,7 +861,7 @@ $('#txBtn').onclick=async()=>{
     const b=renderTxBlock(s,len); results.appendChild(b.wrap); blocks[s.id]=b; });
 
   try{
-    await detectEngine();
+    await detectEngine(); txDevice=pickDevice('#txEngineSel');
     setStep('ensureFF'); plog.textContent='Ładowanie silnika ffmpeg…';
     const ff=await ensureFF();
     prep=await prepareFFInput(setStep,plog);
@@ -890,7 +920,7 @@ $('#allBtn').onclick=async()=>{
   let prep=null; const allChunks=[]; const parts=[];
 
   try{
-    await detectEngine();
+    await detectEngine(); txDevice=pickDevice('#allEngineSel');
     setStep('ensureFF'); log.textContent='Ładowanie silnika ffmpeg…';
     const ff=await ensureFF();
     prep=await prepareFFInput(setStep,log);
