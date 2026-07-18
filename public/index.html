@@ -149,6 +149,31 @@
   .txblock .dl{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
   .txblock .dl button{font:inherit;font-size:11px;padding:4px 9px;background:var(--panel);border:1px solid var(--line);color:var(--muted);border-radius:6px;cursor:pointer}
   .txblock .dl button:hover{color:var(--ink);border-color:var(--accent)}
+
+  /* prawy drawer: transkrypcja całego VODa */
+  .sidetab{position:fixed;right:0;top:120px;z-index:45;writing-mode:vertical-rl;transform:rotate(180deg);
+    background:var(--accent);color:#150e1c;font-weight:700;font-size:12px;letter-spacing:.02em;
+    border:none;border-radius:10px 0 0 10px;padding:14px 8px;cursor:pointer;box-shadow:-2px 2px 10px rgba(0,0,0,.35)}
+  .sidetab:hover{background:var(--accent-2)}
+  .sidepanel{position:fixed;top:0;right:0;bottom:0;width:360px;max-width:92vw;z-index:47;background:var(--panel);
+    border-left:1px solid var(--line);box-shadow:-16px 0 50px rgba(0,0,0,.45);transform:translateX(100%);
+    transition:transform .22s ease;display:flex;flex-direction:column}
+  .sidepanel.show{transform:none}
+  .sidepanel .sh{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line)}
+  .sidepanel .sh h2{margin:0;font-size:16px}
+  .sidepanel .sh .x{margin-left:auto;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
+  .sidepanel .sb{padding:14px 18px;overflow:auto}
+  .sidepanel .sb p.desc{font-size:12px;color:var(--faint);line-height:1.55;margin:0 0 14px}
+  .sidepanel .fld{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .sidepanel .fld label{min-width:52px;color:var(--faint)}
+  .sidepanel select,.sidepanel input[type=number]{font:inherit;font-size:12px;background:var(--panel-2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:5px 8px}
+  .sidepanel .engine{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);color:var(--faint)}
+  .sidepanel .engine.gpu{color:var(--pick);border-color:var(--pick)}
+  .sidepanel textarea{width:100%;min-height:220px;resize:vertical;margin-top:10px;font-family:var(--mono);font-size:11.5px;line-height:1.5;background:var(--panel-2);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 10px}
+  .sidepanel .dl{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .sidepanel .dl button{font:inherit;font-size:11px;padding:5px 10px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);border-radius:6px;cursor:pointer}
+  .sidepanel .dl button:hover{color:var(--ink);border-color:var(--accent)}
+  .sidepanel .prog{margin-top:12px}
   @media(max-width:600px){.wrap{padding:16px 12px 96px}.erow{grid-template-columns:1fr;gap:8px}.erow .times{flex-wrap:wrap}}
 </style>
 </head>
@@ -213,6 +238,43 @@
   <div class="info"><b id="pickCount">0</b> zaznaczonych · łącznie <b id="pickLen">0s</b></div>
   <div class="spacer"></div>
   <button class="btn primary" id="openExport">⚙ Eksport i cięcie</button>
+</div>
+
+<!-- prawy drawer: transkrypcja całego VODa (fundament pod znajdowanie fragmentów) -->
+<button class="sidetab" id="sideTab">⌨ Transkrypcja VODa</button>
+<div class="sidepanel" id="sidePanel">
+  <div class="sh">
+    <h2>Transkrypcja całego VODa</h2>
+    <button class="x" id="sideClose">×</button>
+  </div>
+  <div class="sb">
+    <p class="desc">Pełny transkrypt całego wideo — <b>lokalnie</b>, audio nie opuszcza przeglądarki. Długi film przetwarzany jest <b>blokami</b> (postęp na żywo), a wynik z globalnymi timecodami pobierzesz jako TXT / SRT / VTT oraz <b>JSON z segmentami</b> — gotowy pod dalszy krok wyszukiwania fragmentów.</p>
+    <div class="fld"><label>model</label>
+      <select id="allModel">
+        <option value="tiny">tiny (~40 MB)</option>
+        <option value="base" selected>base (~75 MB)</option>
+        <option value="small">small (~250 MB)</option>
+        <option value="turbo">large-v3-turbo (~800 MB, GPU)</option>
+      </select>
+      <span class="engine" id="allEngine">wykrywanie…</span>
+    </div>
+    <div class="fld"><label>język</label>
+      <select id="allLang">
+        <option value="">auto</option>
+        <option value="polish">polski</option>
+        <option value="english">angielski</option>
+      </select>
+      <label style="min-width:auto">blok</label>
+      <input type="number" id="allBlock" value="5" min="1" max="20" step="1" style="width:56px"> min
+    </div>
+    <button class="btn primary" id="allBtn" style="width:100%;justify-content:center;margin-top:4px">⌨ Transkrybuj cały film</button>
+    <div class="prog" id="allProg">
+      <div class="bar"><i id="allBar"></i></div>
+      <div class="plog" id="allLog">gotowe do startu</div>
+    </div>
+    <textarea id="allText" spellcheck="false" placeholder="Tu pojawi się transkrypt…"></textarea>
+    <div class="dl" id="allDl"></div>
+  </div>
 </div>
 
 <!-- modal -->
@@ -688,8 +750,8 @@ async function detectEngine(){
   let gpu=false;
   try{ if('gpu' in navigator && navigator.gpu){ const a=await navigator.gpu.requestAdapter(); gpu=!!a; } }catch(_){}
   txDevice = gpu ? 'webgpu' : 'wasm';
-  const el=$('#txEngine');
-  if(el){ el.textContent = gpu ? 'WebGPU ✓' : 'WASM (CPU)'; el.classList.toggle('gpu',gpu); }
+  ['#txEngine','#allEngine'].forEach(sel=>{ const el=$(sel);
+    if(el){ el.textContent = gpu ? 'WebGPU ✓' : 'WASM (CPU)'; el.classList.toggle('gpu',gpu); } });
   return txDevice;
 }
 function ensureTxWorker(){
@@ -802,6 +864,65 @@ $('#txBtn').onclick=async()=>{
     console.error('TRANSCRIBE FAILED:', err, 'KROK:', step);
     plog.textContent='Błąd transkrypcji ('+step+'): '+(err&&(err.message||err.name)||err);
     alert('Transkrypcja nie powiodła się.\nKROK: '+step+'\nsilnik: '+txDevice+'\n\n'+(err&&(err.message||err.name)||err)+'\n\nSzczegóły w konsoli (F12).');
+  }finally{
+    if(prep) await prep.cleanup();
+    btn.disabled=false; btn.style.opacity=1;
+  }
+};
+
+/* ---- drawer: transkrypcja całego VODa ---- */
+$('#sideTab').onclick=()=>{ $('#sidePanel').classList.add('show'); detectEngine(); };
+$('#sideClose').onclick=()=>$('#sidePanel').classList.remove('show');
+
+// budowa pełnego transkryptu z globalnymi timecodami → różne formaty
+function buildAllJSON(chunks, D){ const segs=normChunks(chunks,D).map(c=>({start:+c.start.toFixed(2),end:+c.end.toFixed(2),start_tc:fmt(c.start),end_tc:fmt(c.end),text:c.text}));
+  return JSON.stringify({ duration:+((D||0).toFixed(2)), segments:segs }, null, 2); }
+
+$('#allBtn').onclick=async()=>{
+  if(!curVideoFile){ alert('Najpierw wczytaj plik wideo.'); return; }
+  const D=(video.duration&&isFinite(video.duration)&&video.duration>0)?video.duration:0;
+  if(!D){ alert('Poczekaj, aż wideo się wczyta (nieznana długość).'); return; }
+  const size=$('#allModel').value, lang=$('#allLang').value||null;
+  const block=Math.max(60, (parseInt($('#allBlock').value,10)||5)*60);
+  const btn=$('#allBtn'), bar=$('#allBar'), log=$('#allLog'), ta=$('#allText'), dl=$('#allDl');
+  $('#allProg').classList.add('show'); btn.disabled=true; btn.style.opacity=.6; dl.innerHTML='';
+  ffLog.length=0; let step='start'; const setStep=s=>{step=s;};
+  let prep=null; const allChunks=[]; const parts=[];
+
+  try{
+    await detectEngine();
+    setStep('ensureFF'); log.textContent='Ładowanie silnika ffmpeg…';
+    const ff=await ensureFF();
+    prep=await prepareFFInput(setStep,log);
+    const N=Math.ceil(D/block);
+    log.textContent='Model ('+txDevice.toUpperCase()+') — pierwsze użycie pobiera wagi…';
+    for(let k=0;k<N;k++){
+      const st=k*block, len=Math.min(block, D-st);
+      bar.style.width=(k/N*100).toFixed(1)+'%';
+      setStep('extractPCM blok '+(k+1)+'/'+N); log.textContent=`(${k+1}/${N}) audio ${fmt(st)}–${fmt(st+len)}…`;
+      const pcm=await extractPCM(ff, prep.inPath, st, len, 'all'+k);
+      setStep('transcribe blok '+(k+1)+'/'+N); log.textContent=`(${k+1}/${N}) transkrypcja ${fmt(st)}–${fmt(st+len)}…`;
+      const res=await txRequest({type:'run', size, device:txDevice, language:lang, audio:pcm}, [pcm.buffer]);
+      (res.chunks||[]).forEach(c=>{ const a=c.timestamp&&c.timestamp[0], b=c.timestamp&&c.timestamp[1];
+        allChunks.push({ timestamp:[ (a==null?0:a)+st, (b==null?null:b+st) ], text:c.text }); });
+      parts.push((res.text||'').trim());
+      ta.value=parts.join('\n').trim();           // podgląd na żywo
+      ta.scrollTop=ta.scrollHeight;
+    }
+    bar.style.width='100%'; log.textContent=`Gotowe — cały VOD (${N} blok(ów)).`;
+    // pobierania
+    const baseName=(curVideoFile.name||'vod').replace(/\.[a-z0-9]+$/i,'').replace(/[^\w.\-]+/g,'_').slice(0,60)||'vod';
+    const mk=(label,fn)=>{ const b=document.createElement('button'); b.textContent=label; b.onclick=fn; return b; };
+    dl.append(
+      mk('↧ TXT', ()=>download(baseName+'_transkrypt.txt', ta.value, 'text/plain')),
+      mk('↧ SRT', ()=>download(baseName+'_transkrypt.srt', buildSRT(allChunks,D), 'text/plain')),
+      mk('↧ VTT', ()=>download(baseName+'_transkrypt.vtt', buildVTT(allChunks,D), 'text/vtt')),
+      mk('↧ JSON (segmenty)', ()=>download(baseName+'_transkrypt.json', buildAllJSON(allChunks,D), 'application/json')),
+    );
+  }catch(err){
+    console.error('TRANSCRIBE ALL FAILED:', err, 'KROK:', step);
+    log.textContent='Błąd ('+step+'): '+(err&&(err.message||err.name)||err);
+    alert('Transkrypcja całości nie powiodła się.\nKROK: '+step+'\nsilnik: '+txDevice+'\n\n'+(err&&(err.message||err.name)||err)+'\n\nSzczegóły w konsoli (F12).');
   }finally{
     if(prep) await prep.cleanup();
     btn.disabled=false; btn.style.opacity=1;
