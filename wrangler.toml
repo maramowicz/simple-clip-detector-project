@@ -1,4 +1,4 @@
-name = "shorty"
+name = "simple-clip-detector-project"
 main = "src/index.js"
 compatibility_date = "2026-07-01"
 
