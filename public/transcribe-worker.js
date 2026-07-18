@@ -14,19 +14,20 @@ env.remoteHost = self.location.origin;
 env.remotePathTemplate = 'api/hf/{model}/resolve/{revision}/';
 
 // Mapowanie logicznego rozmiaru na konkretne repo + dtype, per silnik.
-//  • WebGPU: onnx-community/* (fp16 enkoder + q4 dekoder — kompromis jakość/VRAM).
+//  • WebGPU: onnx-community/* (fp32 enkoder + q4 dekoder — tak jak robi to referencyjny
+//    Xenova/whisper-webgpu; fp16 enkoder na WebGPU psuje cechy i powoduje halucynacje).
 //  • WASM (CPU): Xenova/* (skwantowane q8) dla małych; turbo tylko z onnx-community (q4).
 function resolveModel(size, device){
   const gpu = device === 'webgpu';
   switch(size){
-    case 'tiny':  return gpu ? ['onnx-community/whisper-tiny',  {encoder_model:'fp16',decoder_model_merged:'q4'}]
+    case 'tiny':  return gpu ? ['onnx-community/whisper-tiny',  {encoder_model:'fp32',decoder_model_merged:'q4'}]
                              : ['Xenova/whisper-tiny', 'q8'];
-    case 'small': return gpu ? ['onnx-community/whisper-small', {encoder_model:'fp16',decoder_model_merged:'q4'}]
+    case 'small': return gpu ? ['onnx-community/whisper-small', {encoder_model:'fp32',decoder_model_merged:'q4'}]
                              : ['Xenova/whisper-small', 'q8'];
     case 'turbo': return ['onnx-community/whisper-large-v3-turbo',
-                          gpu ? {encoder_model:'fp16',decoder_model_merged:'q4'} : 'q4'];
+                          gpu ? {encoder_model:'fp32',decoder_model_merged:'q4'} : 'q4'];
     case 'base':
-    default:      return gpu ? ['onnx-community/whisper-base',  {encoder_model:'fp16',decoder_model_merged:'q4'}]
+    default:      return gpu ? ['onnx-community/whisper-base',  {encoder_model:'fp32',decoder_model_merged:'q4'}]
                              : ['Xenova/whisper-base', 'q8'];
   }
 }
@@ -77,6 +78,12 @@ self.onmessage = async (e)=>{
       return_timestamps: true,
       language: language || null,   // null → autodetekcja języka
       task: 'transcribe',
+      // Dekodowanie greedy — dokładnie jak w referencyjnym Xenova/whisper-webgpu.
+      // Halucynacje wynikały z fp16 enkodera (naprawione w resolveModel), nie z
+      // dekodowania; dlatego NIE dokładamy tu no_repeat_ngram_size/temperature.
+      top_k: 0,
+      do_sample: false,
+      force_full_sequences: false,
     });
     self.postMessage({ type:'result', id, text: out.text || '', chunks: out.chunks || [] });
   }catch(err){
