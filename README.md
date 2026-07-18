@@ -7,14 +7,38 @@ Static Assets** — strona jest czysto statyczna, Worker budzi się tylko dla `/
 ## Struktura
 
 ```
-public/            # assety statyczne (serwowane bez uruchamiania Workera)
-  index.html       # cały front (dawne shorty.html)
-  _headers         # COOP/COEP → cross-origin isolation dla ffmpeg core-mt / WORKERFS
+public/                # assety statyczne (serwowane bez uruchamiania Workera)
+  index.html           # cały front (dawne shorty.html)
+  transcribe-worker.js # Web Worker lokalnej transkrypcji (Transformers.js / Whisper)
+  _headers             # COOP/COEP → cross-origin isolation dla ffmpeg core-mt / WORKERFS
 src/
-  index.js         # Worker: obsługuje tylko /api/* (health, transcribe proxy)
-wrangler.toml      # konfiguracja; run_worker_first = ["/api/*"]
-serve.py           # lokalny serwer z COOP/COEP do testów bez deployu
+  index.js             # Worker: obsługuje tylko /api/* (health, transcribe proxy)
+wrangler.toml          # konfiguracja; run_worker_first = ["/api/*"]
+serve.py               # lokalny serwer z COOP/COEP do testów bez deployu
 ```
+
+## Dane wejściowe (kandydaci)
+
+Lista fragmentów NIE jest już wbita w kod. Wczytujesz ją z pliku JSON (przycisk
+**↥ Wczytaj JSON**) w schemacie zgodnym z eksportem aplikacji, albo dodajesz fragmenty
+ręcznie (**+ Dodaj fragment**). Akceptowany kształt (pola opcjonalne poza start/end):
+
+```json
+[{ "title": "...", "start": 3889, "end": 3960, "tier": "top",
+   "hook": "...", "quote": "...", "why": "...", "filename": "short_01" }]
+```
+
+`start`/`end` mogą być w sekundach lub jako timecode (`HH:MM:SS`). Długość osi czasu
+liczona jest z wczytanego wideo.
+
+## Lokalna transkrypcja (w przeglądarce, prywatnie)
+
+W oknie „Eksport i cięcie" jest panel **Transkrypcja**. Dla zaznaczonych fragmentów:
+ffmpeg wycina audio 16 kHz mono (`-vn -ac 1 -ar 16000 -f f32le`), a **Transformers.js**
+(Whisper przez ONNX Runtime Web) transkrybuje je lokalnie — audio nie opuszcza urządzenia.
+Silnik: **WebGPU** gdy dostępny (auto-fallback na **WASM/CPU**). Model wybierasz w UI
+(tiny/base/small/large-v3-turbo); pobiera się raz i jest cache'owany. Wynik: TXT / SRT / VTT
+(timecody względem początku fragmentu). To alternatywa dla chmurowego `/api/transcribe`.
 
 ## Dlaczego cross-origin isolation
 
