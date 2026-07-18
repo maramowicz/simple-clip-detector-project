@@ -510,7 +510,15 @@ $('#cutBtn').onclick=async()=>{
       step='createDir '+MOUNT;
       await ff.createDir(MOUNT);
       step='mount WORKERFS ('+curVideoFile.name+')';
-      await ff.mount(WORKERFS, { files:[curVideoFile] }, MOUNT);
+      // WORKERFS montuje plik pod jego właściwością File.name (z oryginalnymi spacjami/
+      // znakami specjalnymi). Owijamy go w nową, sanityzowaną nazwę, żeby ścieżka podawana
+      // ffmpegowi (inPath) się zgadzała i była wolna od spacji/znaków specjalnych.
+      // new File([blob], name) to referencja do tego samego blobu — NIE kopiuje danych do
+      // pamięci, więc 4 GB nie ląduje w RAM (WORKERFS czyta wycinki na żądanie).
+      const mountFile = (curVideoFile.name===mountedName)
+        ? curVideoFile
+        : new File([curVideoFile], mountedName, {type:curVideoFile.type||''});
+      await ff.mount(WORKERFS, { files:[mountFile] }, MOUNT);
       mounted=true;
       inPath=`${MOUNT}/${mountedName}`;
     }
