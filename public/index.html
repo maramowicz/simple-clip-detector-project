@@ -418,12 +418,14 @@ $('#expJson').onclick=()=>download('shorty_wybrane.json',
 
 /* ---- ffmpeg cutting ---- */
 let ffmpeg=null, ffLoaded=false;
+const ffLog=[];                              // ring buffer ostatnich linii logu ffmpeg (do diagnostyki)
+function pushLog(m){ if(!m)return; ffLog.push(m); if(ffLog.length>40) ffLog.shift(); }
 async function ensureFF(){
   if(ffLoaded) return ffmpeg;
   if(!window.__ff){ throw new Error('Biblioteka ffmpeg nie została załadowana (brak internetu przy pierwszym uruchomieniu?).'); }
   const {FFmpeg,toBlobURL}=window.__ff;
   ffmpeg=new FFmpeg();
-  ffmpeg.on('log',({message})=>{ if(message) $('#progLog').textContent=message.slice(0,120); });
+  ffmpeg.on('log',({message})=>{ if(message){ pushLog(message); $('#progLog').textContent=message.slice(0,120); } });
   ffmpeg.on('progress',({progress})=>{ /* per-plik; łączony pasek liczymy ręcznie */ });
   // Do montowania dużych plików (WORKERFS) potrzebny jest core-mt, który biegnie w prawdziwym
   // workerze z pthreadami. Wymaga on cross-origin isolation (nagłówki COOP/COEP) i SharedArrayBuffer.
@@ -469,8 +471,11 @@ $('#cutBtn').onclick=async()=>{
   let inPath=mountedName;
   let mounted=false;
   const GB=1073741824;
+  ffLog.length=0;                            // czyścimy bufor logów na nowy przebieg
+  let step='start';                          // gdzie jesteśmy — do raportu błędu
 
   try{
+    step='ensureFF (ładowanie silnika)';
     plog.textContent='Ładowanie silnika ffmpeg (jednorazowo, ~30 MB)…';
     const ff=await ensureFF();
     const {FFFSType,fetchFile}=window.__ff;
@@ -493,14 +498,18 @@ $('#cutBtn').onclick=async()=>{
     }
 
     if(!useMount){
+      step='writeFile (wczytanie pliku do pamięci)';
       plog.textContent='Wczytywanie pliku do pamięci ('+(curVideoFile.size/GB).toFixed(2)+' GB)…';
       await ff.writeFile(mountedName, await fetchFile(curVideoFile));
       inPath=mountedName;
     } else {
       plog.textContent='Duży plik ('+(curVideoFile.size/GB).toFixed(1)+' GB) — montowanie przez WORKERFS…';
+      step='unmount/deleteDir (sprzątanie po poprzednim mount)';
       try{ await ff.unmount(MOUNT); }catch(_){}
       try{ await ff.deleteDir(MOUNT); }catch(_){}
+      step='createDir '+MOUNT;
       await ff.createDir(MOUNT);
+      step='mount WORKERFS ('+curVideoFile.name+')';
       await ff.mount(WORKERFS, { files:[curVideoFile] }, MOUNT);
       mounted=true;
       inPath=`${MOUNT}/${mountedName}`;
@@ -519,7 +528,9 @@ $('#cutBtn').onclick=async()=>{
       const args = copyMode
         ? ['-ss',st.toFixed(3),'-i',inPath,'-t',len.toFixed(3),'-c','copy','-avoid_negative_ts','make_zero',outName]
         : ['-ss',st.toFixed(3),'-i',inPath,'-t',len.toFixed(3),'-c:v','libx264','-preset','veryfast','-crf','20','-c:a','aac','-b:a','160k','-movflags','+faststart',outName];
+      step=`exec (${i+1}/${sel.length}): ffmpeg ${args.join(' ')}`;
       await ff.exec(args);
+      step=`readFile (${i+1}/${sel.length}): ${outName}`;
       const data=await ff.readFile(outName);
       const mime=outExt==='webm'?'video/webm':outExt==='mkv'?'video/x-matroska':'video/mp4';
       const blob=new Blob([data.buffer],{type:mime});
@@ -531,16 +542,27 @@ $('#cutBtn').onclick=async()=>{
     bar.style.width='100%'; plog.textContent=`Gotowe — pobrano ${sel.length} plik(ów).`;
   }catch(err){
     console.error('CUT FAILED:', err);
+    const env = [
+      'KROK: '+step,
+      'crossOriginIsolated: '+window.crossOriginIsolated,
+      'core-mt (__ffMt): '+window.__ffMt,
+      'rozmiar pliku: '+(curVideoFile?(curVideoFile.size/GB).toFixed(2)+' GB':'—'),
+      'ścieżka: '+(mounted?'WORKERFS mount':'writeFile'),
+      'tryb cięcia: '+cutMode,
+      'inPath: '+inPath,
+    ].join('\n');
     const detail = [
       'name: '+(err&&err.name),
       'message: '+(err&&err.message),
       'errno: '+(err&&err.errno),
       'code: '+(err&&err.code),
     ].join('\n');
-    console.error(detail);
+    const tail = ffLog.slice(-12).join('\n') || '(brak logu ffmpeg — błąd przed startem enkodera)';
+    console.error(env); console.error(detail);
+    console.error('OSTATNIE LINIE LOGU FFMPEG:\n'+tail);
     console.error(err&&err.stack);
-    plog.textContent='Błąd: '+(err&&(err.message||err.name)||err);
-    alert('Cięcie nie powiodło się.\n\n'+detail+'\n\nPełny stack jest w konsoli (F12). Skopiuj go — jednoznacznie wskaże, na którym kroku (mount / exec / readFile) i z jakim errno to leci.');
+    plog.textContent='Błąd ('+step+'): '+(err&&(err.message||err.name)||err);
+    alert('Cięcie nie powiodło się.\n\n=== ŚRODOWISKO ===\n'+env+'\n\n=== BŁĄD ===\n'+detail+'\n\n=== OSTATNIE LINIE FFMPEG ===\n'+tail+'\n\nPełny stack w konsoli (F12).');
   }finally{
     try{
       if(mounted){ await ffmpeg.unmount(MOUNT); }
